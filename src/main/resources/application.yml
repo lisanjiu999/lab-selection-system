@@ -1,8 +1,18 @@
 server:
   port: 8080
+  # 登录页的 WebGL 院徽是 2.4MB 的 three.js 打包产物，开 gzip 后约 600KB
+  compression:
+    enabled: true
+    mime-types: application/javascript,text/javascript,text/css,application/json,text/html,image/svg+xml,text/plain
+    min-response-size: 2048
 spring:
   application:
     name: selection-system
+  # 简历上传。Spring 默认单文件只给 1MB，5MB 的 PDF 会被静默挡在 413。
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: jdbc:h2:mem:lab;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     driver-class-name: org.h2.Driver

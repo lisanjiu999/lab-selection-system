@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>实训室开放日 · 3D 展厅</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg?v=20261119f">
+<link rel="stylesheet" href="assets/fonts3/fonts.css?v=20261119f">
+<link rel="stylesheet" href="assets/openday.css?v=20261119f">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="stage"></canvas>
+
+<!-- 顶栏：网格页显示标题，展厅页显示返回 + 实验室名 -->
+<header class="hud-top" id="hudTop">
+  <button class="hud-btn" id="backBtn" type="button">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+         stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    <span id="backLabel">退出</span>
+  </button>
+  <div class="hud-copy">
+    <div class="hud-kicker" id="hudKicker">实训室开放日</div>
+    <h1 class="hud-title" id="hudTitle">选择一间实训室</h1>
+  </div>
+  <div class="hud-side" id="hudSide"></div>
+</header>
+
+<!-- 网格页：底部一句操作说明 -->
+<div class="hint" id="hint">
+  <span class="hint-dot"></span>移动鼠标看细节，点击方块进入展厅
+</div>
+
+<!-- 展厅页：聚焦某块屏时出现的翻页条 -->
+<div class="screen-bar" id="screenBar" hidden>
+  <div class="sb-copy">
+    <b id="sbTitle"></b>
+    <span id="sbSub"></span>
+  </div>
+  <div class="sb-nav">
+    <button class="hud-btn" id="sbPrev" type="button" aria-label="上一页">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5l-7 7 7 7"/></svg>
+    </button>
+    <span class="sb-page tnum" id="sbPage">1 / 6</span>
+    <button class="hud-btn" id="sbNext" type="button" aria-label="下一页">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5l7 7-7 7"/></svg>
+    </button>
+    <button class="hud-btn hud-btn-quiet" id="sbExit" type="button">退出聚焦</button>
+  </div>
+</div>
+
+<!-- 展厅页：底部操作提示，会自动淡出 -->
+<div class="keys" id="keys" hidden>
+  <span><b>拖动</b>转视角</span>
+  <span><b>W A S D</b>移动</span>
+  <span><b>滚轮</b>远近</span>
+  <span><b>点大屏</b>聚焦</span>
+  <span><b>Esc</b>退出</span>
+</div>
+
+<!-- 黑场：场景切换时盖住，避免看到构建过程 -->
+<div class="veil" id="veil"></div>
+
+<!-- 启动层：加载中 / 出错 / 未登录 -->
+<div class="boot" id="boot">
+  <div class="boot-inner">
+    <div class="boot-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3h6M10 3v5.5L4.8 17a2.5 2.5 0 0 0 2.1 3.8h10.2A2.5 2.5 0 0 0 19.2 17L14 8.5V3"/>
+        <path d="M7 14h10"/>
+      </svg>
+    </div>
+    <p class="boot-text" id="bootText">正在布置展厅…</p>
+    <div class="boot-bar"><i></i></div>
+    <button class="boot-btn" id="bootBtn" type="button" hidden>回到登录页</button>
+  </div>
+</div>
+
+<script type="module" src="assets/openday.js?v=20261119f"></script>
+</body>
+</html>

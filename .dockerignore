@@ -1,0 +1,3 @@
+# 只把打好的 jar 送进构建上下文，源码/依赖/临时脚本都不必上传
+*
+!target/selection-system-1.0.0.jar

@@ -69,6 +69,21 @@ public class AdminController extends BaseController {
         return service.moveMentor(id, Long.valueOf(String.valueOf(body.get("labId"))));
     }
 
+    /** 改导师档案。字段都是可选的：没传就是不改。 */
+    @PutMapping("/mentors/{id}")
+    public Map<String, Object> updateMentor(@RequestHeader(value = "X-Token", required = false) String token,
+                                            @PathVariable Long id, @RequestBody Map<String, Object> body) {
+        self(token, "admin");
+        return service.updateMentor(
+                id,
+                text(body.get("title")),
+                text(body.get("tags")),
+                body.get("labId") == null ? null : Long.valueOf(String.valueOf(body.get("labId"))),
+                num(body.get("quota")),
+                num(body.get("remaining")),
+                text(body.get("intro")));
+    }
+
     @DeleteMapping("/mentors/{id}")
     public Map<String, Object> remove(@RequestHeader(value = "X-Token", required = false) String token,
                                       @PathVariable Long id) {
@@ -97,6 +112,16 @@ public class AdminController extends BaseController {
 
     private String str(Object o) {
         return o == null ? "" : String.valueOf(o);
+    }
+
+    /** 字段没传时返回 null，让 service 区分「没改」和「改成空」。 */
+    private String text(Object o) {
+        return o == null ? null : String.valueOf(o);
+    }
+
+    private Integer num(Object o) {
+        if (o == null || String.valueOf(o).isBlank()) return null;
+        return (int) Double.parseDouble(String.valueOf(o));
     }
 
     /** 接受 "2026-11-02T09:30" / "2026-11-02T09:30:00" 两种写法。 */

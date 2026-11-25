@@ -33,10 +33,6 @@ public class StageService {
         this.demoNow = t;
     }
 
-    public StageConfig byId(Long id) {
-        return em.find(StageConfig.class, id);
-    }
-
     /** 管理员改某个阶段的时间窗。只校验先后，不强制与相邻阶段衔接。 */
     @Transactional
     public StageConfig updateWindow(Long id, LocalDateTime start, LocalDateTime end) {
@@ -66,11 +62,6 @@ public class StageService {
     public boolean at(String code) {
         StageConfig c = current();
         return c != null && c.code.equals(code);
-    }
-
-    public boolean after(String code) {
-        StageConfig c = current();
-        return c != null && c.seq > seq(code);
     }
 
     public StageConfig next() {

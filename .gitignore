@@ -1,0 +1,24 @@
+# 构建产物
+target/
+dist/
+output/
+*.jar
+
+# 本地数据与日志
+data/
+*.log
+*.db
+*.mv.db
+*.trace.db
+
+# 提交材料（截图、Word、压缩包，单独归档）
+提交材料/
+
+# IDE 与工具
+.idea/
+.vscode/
+*.iml
+.workbuddy-ai/
+node_modules/
+.DS_Store
+Thumbs.db

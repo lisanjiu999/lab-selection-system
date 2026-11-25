@@ -28,25 +28,25 @@ VIEWS.mentor.overview = async () => {
   </div>
 
   <div class="sec">
-    <div class="sec-head"><h2 class="sec-title">待办</h2><span class="sec-note">按当前阶段自动排序</span></div>
+    <div class="sec-head"><h2 class="sec-title">待办</h2></div>
     <div class="table-wrap"><table class="data">
       <thead><tr><th style="width:150px">事项</th><th>说明</th><th class="num" style="width:90px">数量</th><th style="width:96px"></th></tr></thead>
       <tbody>
         <tr>
           <td class="cell-strong">面试评分</td>
-          <td class="cell-sub">对每位报名学生给出四维分数与评语，评分结果只有本导师可见</td>
+          <td class="cell-sub">四维评分与评语，仅本导师可见</td>
           <td class="num">${todoScore}</td>
           <td style="text-align:right"><button class="btn btn-sm" data-go="m/score">去评分</button></td>
         </tr>
         <tr>
           <td class="cell-strong">录取决策</td>
-          <td class="cell-sub">标注拟录取、递补（有序）与内部调剂候选，拟录取不得超过名额</td>
+          <td class="cell-sub">拟录取、递补、内部调剂候选</td>
           <td class="num">${todoDecide}</td>
           <td style="text-align:right"><button class="btn btn-sm" data-go="m/decision">去决策</button></td>
         </tr>
         <tr>
           <td class="cell-strong">个人介绍</td>
-          <td class="cell-sub">学生在开放日与填报阶段看到的就是这段文字，提交后由管理员审核</td>
+          <td class="cell-sub">学生可见，提交后需审核</td>
           <td class="num">${o.mentor.introStatus === 'APPROVED' ? '已审核' : '待完善'}</td>
           <td style="text-align:right"><button class="btn btn-sm" data-go="m/profile">去编辑</button></td>
         </tr>
@@ -66,7 +66,7 @@ VIEWS.mentor.profile = async () => {
   const o = await api('/mentor/overview');
   const m = o.mentor;
   return `
-  ${pageHead('我的介绍', '学生点开你的名字看到的就是这段内容。写清楚在做什么、怎么带、希望什么样的人。',
+  ${pageHead('我的介绍', '学生看到的自我介绍。',
     `<span class="tag ${m.introStatus === 'APPROVED' ? 'tag-ok' : 'tag-quiet'}">${m.introStatus === 'APPROVED' ? '已审核' : m.introStatus === 'PENDING' ? '待审核' : '草稿'}</span>`)}
 
   <div class="grid-2">
@@ -85,7 +85,6 @@ VIEWS.mentor.profile = async () => {
       </div>
       <div class="btn-row" style="margin-top:18px">
         <button class="btn btn-primary" id="saveProfile">提交审核</button>
-        <span class="small muted" style="align-self:center">提交后进入待审核状态，管理员通过即对学生可见。</span>
       </div>
     </div>
     <aside>
@@ -118,22 +117,22 @@ VIEWS.mentor.applicants = async () => {
   const data = await api('/mentor/applicants');
   const rows = data.applicants;
   return `
-  ${pageHead('报名学生', `共 ${rows.length} 人填报了你。这里不显示志愿顺序，也不显示他们还报了谁。`,
-    `<span class="tag tnum">名额 ${data.quota} · 已录 ${data.enrolled}</span>`)}
+  ${pageHead('报名学生', `共 ${rows.length} 人填报了你。`,
+    `<span class="tag tnum">名额 ${data.quota} · 已确认 ${data.enrolled}</span>`)}
   ${stageBanner()}
   <div class="sec">
     ${rows.length === 0 ? `<div class="empty"><b>还没有学生填报你</b>填报阶段结束后这里会出现名单。</div>` : `
     <div class="table-wrap"><table class="data">
       <thead><tr>
-        <th>学号</th><th>姓名</th><th>班级</th><th class="num">绩点</th><th>技能</th>
+        <th>学号</th><th>姓名</th><th>班级</th><th>技能</th><th>简历</th>
         <th>调剂意愿</th><th class="num">面试分</th><th>决策</th>
       </tr></thead>
       <tbody>${rows.map(r => `<tr>
         <td class="tnum cell-sub">${esc(r.no)}</td>
         <td><div class="cell-who">${pixelAvatar(r.name, 15)}<span class="cell-strong">${esc(r.name)}</span></div></td>
         <td class="cell-sub">${esc(r.className)}</td>
-        <td class="num">${r.gpa.toFixed(1)}</td>
         <td class="cell-sub">${esc(r.skill)}</td>
+        <td>${resumeLink(r)}</td>
         <td class="cell-sub">${r.acceptInner ? '室内' : ''}${r.acceptInner && r.acceptCross ? ' · ' : ''}${r.acceptCross ? '跨室' : ''}${!r.acceptInner && !r.acceptCross ? '<span class="muted">不服从</span>' : ''}</td>
         <td class="num">${r.score === null ? '<span class="muted">未评</span>' : r.score}</td>
         <td>${decisionTag(r.decision, r.waitRank)}</td>
@@ -142,6 +141,26 @@ VIEWS.mentor.applicants = async () => {
     <p class="small muted" style="margin-top:16px">「不显示志愿顺序」是硬约束：接口层面就不下发该字段，前端无法还原。</p>`}
   </div>`;
 };
+
+/* 简历列只显示格式和大小，文件名太长会把表格撑开；完整名字挂在 title 上 */
+function resumeLink(r, compact = true) {
+  if (!r.resume) return '<span class="muted">未上传</span>';
+  const ext = r.resume.fileName.split('.').pop().toUpperCase();
+  const label = compact ? `${ext} · ${fmtSize(r.resume.size)}` : r.resume.fileName;
+  return `<button class="btn-link tnum" type="button" data-resume="${r.studentId}"
+    data-name="${esc(r.resume.fileName)}" title="${esc(r.resume.fileName)}">${esc(label)}</button>`;
+}
+
+function bindResumeDownload(root) {
+  root.addEventListener('click', e => {
+    const b = e.target.closest('[data-resume]');
+    if (!b) return;
+    downloadFile('/mentor/applicants/' + b.dataset.resume + '/resume', b.dataset.name)
+      .catch(err => toast(err.message, 'err'));
+  });
+}
+
+VIEWS.mentor.applicants.mount = root => bindResumeDownload(root);
 
 function decisionTag(d, rank) {
   if (!d) return '<span class="tag tag-quiet">待定</span>';
@@ -156,9 +175,9 @@ VIEWS.mentor.score = async () => {
   const rows = data.applicants;
   const inInterview = App.boot.current && App.boot.current.code === 'INTERVIEW';
   return `
-  ${pageHead('面试评分', '四维各 1—5 分，折算百分制。评分只对本导师可见，其他导师看不到。',
+  ${pageHead('面试评分', '四维各 1—5 分，折算百分制。',
     `<span class="tag tnum">已评 ${rows.filter(r => r.score !== null).length} / ${rows.length}</span>`)}
-  ${inInterview ? '' : `<div class="notice" style="margin-bottom:24px"><span class="dot"></span><span>当前不在面试考核时间窗，评分只读。</span></div>`}
+  ${inInterview ? '' : `<div class="notice" style="margin-bottom:24px"><span class="dot"></span><span>当前不在面试考核时间窗，评分只读。演示时可让管理端在「阶段控制」把演示时钟拨到 11-02 12:00 之后。</span></div>`}
   <div class="sec">
     ${rows.length === 0 ? `<div class="empty"><b>没有可评分的学生</b></div>` : `
     <div class="table-wrap"><table class="data">
@@ -166,11 +185,12 @@ VIEWS.mentor.score = async () => {
       <tbody>${rows.map(r => {
         const d = r.dimensions || { attitude: 3, logic: 3, coding: 3, time: 3 };
         return `<tr data-row="${r.studentId}">
-        <td style="min-width:190px">
+        <td style="min-width:200px">
           <div class="cell-who">${pixelAvatar(r.name, 20)}
             <div>
               <div class="cell-strong">${esc(r.name)}</div>
-              <div class="cell-sub" style="white-space:nowrap">${esc(r.className)} · 绩点 ${r.gpa.toFixed(1)}</div>
+              <div class="cell-sub" style="white-space:nowrap">${esc(r.className)}</div>
+              <div style="margin-top:5px">${resumeLink(r)}</div>
             </div>
           </div>
         </td>
@@ -201,6 +221,7 @@ function dimInput(name, label, value, enabled) {
 }
 
 VIEWS.mentor.score.mount = root => {
+  bindResumeDownload(root);
   root.addEventListener('input', e => {
     const input = e.target.closest('[data-dim]');
     if (!input) return;
@@ -229,9 +250,9 @@ VIEWS.mentor.decision = async () => {
   const inInterview = App.boot.current && App.boot.current.code === 'INTERVIEW';
   const admits = rows.filter(r => r.decision === 'ADMIT').length;
   return `
-  ${pageHead('录取决策', '按面试总分排序。拟录取受名额限制；递补按顺序补位；内部调剂候选交给本室其他导师。',
+  ${pageHead('录取决策', '按面试总分排序。',
     `<span class="tag ${admits >= data.quota ? 'tag-red' : ''} tnum">拟录取 ${admits} / ${data.quota}</span>`)}
-  ${inInterview ? '' : `<div class="notice" style="margin-bottom:24px"><span class="dot"></span><span>当前不在面试考核时间窗，决策只读。</span></div>`}
+  ${inInterview ? '' : `<div class="notice" style="margin-bottom:24px"><span class="dot"></span><span>当前不在面试考核时间窗，决策只读。演示时可让管理端在「阶段控制」把演示时钟拨到 11-02 12:00 之后。</span></div>`}
   <div class="sec">
     <div class="table-wrap"><table class="data">
       <thead><tr><th>学生</th><th class="num">面试分</th><th>评语</th><th>当前决策</th><th style="text-align:right">标注为</th></tr></thead>
@@ -240,15 +261,16 @@ VIEWS.mentor.decision = async () => {
           <div class="cell-who">${pixelAvatar(r.name, 20)}
             <div>
               <div class="cell-strong">${esc(r.name)}</div>
-              <div class="cell-sub">${esc(r.className)} · 绩点 ${r.gpa.toFixed(1)}</div>
+              <div class="cell-sub">${esc(r.className)}</div>
+              <div style="margin-top:5px">${resumeLink(r)}</div>
             </div>
           </div>
         </td>
         <td class="num">${r.score === null ? '—' : r.score}</td>
-        <td class="cell-sub" style="max-width:280px">${esc(r.comment || '')}</td>
+        <td class="cell-sub cell-wrap" style="max-width:280px">${esc(r.comment || '')}</td>
         <td>${decisionTag(r.decision, r.waitRank)}</td>
-        <td>
-          <div class="btn-row" style="justify-content:flex-end">
+        <td style="min-width:246px">
+          <div class="btn-row" style="justify-content:flex-end;flex-wrap:nowrap">
             <button class="btn btn-sm ${r.decision === 'ADMIT' ? 'btn-primary' : ''}" data-set="ADMIT" data-sid="${r.studentId}" ${inInterview ? '' : 'disabled'}>拟录取</button>
             <button class="btn btn-sm ${r.decision === 'WAIT' ? 'btn-primary' : ''}" data-set="WAIT" data-sid="${r.studentId}" ${inInterview ? '' : 'disabled'}>递补</button>
             <button class="btn btn-sm ${r.decision === 'ADJUST' ? 'btn-primary' : ''}" data-set="ADJUST" data-sid="${r.studentId}" ${inInterview ? '' : 'disabled'}>调剂候选</button>
@@ -260,6 +282,7 @@ VIEWS.mentor.decision = async () => {
 };
 
 VIEWS.mentor.decision.mount = root => {
+  bindResumeDownload(root);
   root.addEventListener('click', e => {
     const b = e.target.closest('[data-set]');
     if (!b) return;

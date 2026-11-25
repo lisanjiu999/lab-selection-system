@@ -53,8 +53,13 @@ public class SelectionService {
                 .setParameter("l", labId).getResultList();
     }
 
-    private long count(String jpql, String p, Object v) {
-        return em.createQuery(jpql, Long.class).setParameter(p, v).getSingleResult();
+    /** 计数查询。参数按「名字, 值」成对传入，支持多个命名参数。 */
+    private long count(String jpql, Object... pairs) {
+        jakarta.persistence.Query q = em.createQuery(jpql, Long.class);
+        for (int i = 0; i + 1 < pairs.length; i += 2) {
+            q.setParameter((String) pairs[i], pairs[i + 1]);
+        }
+        return (Long) q.getSingleResult();
     }
 
     /** 某导师已确认人数（名额占用的唯一口径）。 */
@@ -103,14 +108,21 @@ public class SelectionService {
         for (Mentor m : allMentors()) {
             if (!"ACTIVE".equals(m.status)) continue;
             LabRoom l = labMap.get(m.labId);
+            long enrolled = enrolledCount(m.id);
             Map<String, Object> r = new LinkedHashMap<>();
             r.put("id", m.id);
             r.put("name", m.name);
             r.put("title", m.title);
             r.put("tags", m.tags);
             r.put("quota", m.quota);
-            r.put("remaining", remaining(m));
+            /* 名额和剩余要能联动改，前端得知道已录取是多少——
+               remaining 被 max(0,·) 截断过，反推不出来。 */
+            r.put("enrolled", enrolled);
+            r.put("remaining", (int) Math.max(0, m.quota - enrolled));
             r.put("introStatus", m.introStatus);
+            /* 管理员的「基础数据」要能直接读到简介正文，不能只给个审核状态。
+               学生端选择器也用这个接口，多带一段文本换来的便利比省下的字节值。 */
+            r.put("intro", m.intro == null ? "" : m.intro);
             r.put("labId", m.labId);
             r.put("labCode", l == null ? "" : l.code);
             r.put("labName", l == null ? "" : l.name);
@@ -137,6 +149,27 @@ public class SelectionService {
             ms.add(row);
         }
         return Map.of("lab", l, "mentors", ms);
+    }
+
+    /** 开放日 3D 展厅：实验室 + 该室导师的完整简介。
+     *  labDetail 的 excerpt 只截 46 字，够卡片用，但展板上要成段排，所以单独给一份。 */
+    public Map<String, Object> hallOf(Long labId) {
+        LabRoom l = lab(labId);
+        if (l == null) throw new ApiException("实训室不存在");
+        List<Map<String, Object>> ms = new ArrayList<>();
+        for (Mentor m : mentorsOfLab(labId)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", m.id);
+            row.put("name", m.name);
+            row.put("title", m.title);
+            row.put("tags", m.tags);
+            row.put("intro", m.intro == null ? "" : m.intro);
+            ms.add(row);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("lab", l);
+        out.put("mentors", ms);
+        return out;
     }
 
     public Map<String, Object> mentorDetail(Long mentorId) {
@@ -179,14 +212,20 @@ public class SelectionService {
         }
         boolean inner = list.isEmpty() || list.get(0).acceptInner;
         boolean cross = list.isEmpty() || list.get(0).acceptCross;
+        boolean submitted = !list.isEmpty();
         return Map.of("intentions", rows, "acceptInner", inner, "acceptCross", cross,
-                "locked", !stage.at("INTENT"));
+                "submitted", submitted,
+                "locked", submitted || !stage.at("INTENT"));
     }
 
     @Transactional
     public Map<String, Object> submitIntentions(Long studentId, List<Long> mentorIds,
                                                 boolean acceptInner, boolean acceptCross) {
         if (!stage.at("INTENT")) throw new ApiException("当前不在意向填报时间窗内");
+        /* 意向只提交一次：提交后不可增删改，避免来回摇摆 */
+        long existing = count("select count(i) from Intention i where i.studentId=:s and i.roundNo=1",
+                "s", studentId);
+        if (existing > 0) throw new ApiException("意向已提交，提交后不可修改");
         if (mentorIds == null || mentorIds.isEmpty()) throw new ApiException("至少选择 1 位导师");
         if (mentorIds.size() > 3) throw new ApiException("最多填报 3 个平行意向");
         if (new HashSet<>(mentorIds).size() != mentorIds.size()) throw new ApiException("不能重复选择同一位导师");
@@ -194,26 +233,33 @@ public class SelectionService {
             Mentor m = mentor(mid);
             if (m == null || !"ACTIVE".equals(m.status)) throw new ApiException("所选导师不可选");
         }
-        em.createQuery("delete from Intention i where i.studentId=:s and i.roundNo=1")
-                .setParameter("s", studentId).executeUpdate();
         for (Long mid : mentorIds) {
             Intention i = new Intention();
             i.studentId = studentId;
             i.mentorId = mid;
             i.acceptInner = acceptInner;
             i.acceptCross = acceptCross;
-            i.submittedAt = LocalDateTime.now();
+            i.submittedAt = stage.now();
             em.persist(i);
         }
         return Map.of("ok", true, "count", mentorIds.size());
     }
 
+    /* 读的时候顺手把过了确认截止时间的拟录取标成逾期：
+       管理员直接拨时钟跳阶段不会触发结算，不这么做页面会留一个点不动的按钮。 */
+    @Transactional
     public Map<String, Object> myOffers(Long studentId) {
+        settleDue();
+        LocalDateTime deadline = confirmDeadline();
         List<Offer> offers = em.createQuery(
                         "select o from Offer o where o.studentId=:s order by o.id", Offer.class)
                 .setParameter("s", studentId).getResultList();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Offer o : offers) {
+            if ("PENDING".equals(o.status) && deadline != null && stage.now().isAfter(deadline)) {
+                o.status = "EXPIRED";
+                em.merge(o);
+            }
             Mentor m = mentor(o.mentorId);
             LabRoom l = m == null ? null : lab(m.labId);
             Map<String, Object> r = new LinkedHashMap<>();
@@ -235,9 +281,14 @@ public class SelectionService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("offers", rows);
         out.put("enrollment", en == null ? null : enrollmentRow(en));
-        out.put("deadline", stage.stages().stream().filter(s -> s.code.equals("CONFIRM")).findFirst()
-                .map(s -> s.endAt).orElse(null));
+        out.put("deadline", deadline);
         return out;
+    }
+
+    /** 确认截止时间：拟录取与学生确认阶段结束的那一刻，过了就视为放弃。 */
+    public LocalDateTime confirmDeadline() {
+        return stage.stages().stream().filter(s -> s.code.equals("CONFIRM"))
+                .findFirst().map(s -> s.endAt).orElse(null);
     }
 
     private Enrollment myEnrollment(Long studentId) {
@@ -260,7 +311,12 @@ public class SelectionService {
 
     @Transactional
     public Map<String, Object> confirmOffer(Long studentId, Long offerId) {
-        if (!stage.at("CONFIRM")) throw new ApiException("当前不在确认时间窗内");
+        /* 只看截止时间，不看当前停在哪个阶段：
+           管理员拨时钟跳阶段时不会结算，按阶段判断会让学生明明有拟录取却点不动。 */
+        LocalDateTime deadline = confirmDeadline();
+        if (deadline != null && stage.now().isAfter(deadline)) {
+            throw new ApiException("确认时间已过，拟录取已释放给递补队列");
+        }
         Offer target = em.find(Offer.class, offerId);
         if (target == null || !Objects.equals(target.studentId, studentId)) throw new ApiException("意向不存在");
         if (!"PENDING".equals(target.status)) throw new ApiException("该意向已处理");
@@ -322,6 +378,7 @@ public class SelectionService {
             r.put("comment", sc == null ? null : sc.comment);
             r.put("decision", d == null ? null : d.decision);
             r.put("waitRank", d == null ? null : d.waitRank);
+            r.put("resume", resumeMeta(s.id));
             rows.add(r);
         }
         return Map.of("applicants", rows, "quota", mentor(mentorId).quota,
@@ -366,7 +423,8 @@ public class SelectionService {
     }
 
     private boolean hasIntention(Long mentorId, Long studentId) {
-        return count("select count(i) from Intention i where i.mentorId=:m and i.studentId=:s", "m", mentorId) > 0;
+        return count("select count(i) from Intention i where i.mentorId=:m and i.studentId=:s",
+                "m", mentorId, "s", studentId) > 0;
     }
 
     @Transactional
@@ -406,7 +464,9 @@ public class SelectionService {
 
     // ---------------------------------------------------------------- 管理员端
 
+    @Transactional
     public Map<String, Object> dashboard() {
+        settleDue();
         List<Map<String, Object>> rows = new ArrayList<>();
         int quotaAll = 0, enrolledAll = 0, applicantsAll = 0;
         for (LabRoom l : labs()) {
@@ -461,18 +521,20 @@ public class SelectionService {
         return Map.of("labs", rows, "totals", totals);
     }
 
-    @Transactional
     // ---------------------------------------------------------------- 演示时钟
 
-    /** 把演示时钟拨到任意时刻，八个阶段的状态随之变化。 */
+    /** 把演示时钟拨到任意时刻，八个阶段的状态随之变化。拨过去的阶段照样要结算。 */
+    @Transactional
     public Map<String, Object> setClock(LocalDateTime at) {
         if (at == null) throw new ApiException("请提供时间");
         stage.moveTo(at);
+        List<String> log = settleDue();
         StageConfig cur = stage.current();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
         out.put("demoNow", stage.now());
         out.put("stage", cur == null ? null : cur.name);
+        out.put("log", log);
         return out;
     }
 
@@ -486,30 +548,49 @@ public class SelectionService {
         return out;
     }
 
-    public Map<String, Object> advanceStage() {        StageConfig cur = stage.current();
+    /* 推进阶段 = 把时钟拨到下一阶段开头，然后让 settleDue() 把该结算的都结算掉。 */
+    @Transactional
+    public Map<String, Object> advanceStage() {
         StageConfig next = stage.next();
         if (next == null) throw new ApiException("已到最后一个阶段");
+        stage.moveTo(next.startAt.plusMinutes(30));
+        List<String> log = settleDue();
+        return Map.of("ok", true, "stage", stage.current().name, "log", log);
+    }
+
+    /* 结算的触发条件是「时间已经跨过某个阶段的结束时刻」，不是「点了推进按钮」。
+       原来只在 advanceStage 里结算，管理员改用演示时钟跳阶段就整段绕过去了：
+       管理员看板上「拟录取」那一列读的是导师的决策表（MentorDecision），照常有数；
+       学生端「我的结果」读的是 Offer 表，一条都没有——打开就是空白。
+       两边读的不是同一张表，所以这种不一致在管理员那边完全看不出来。
+
+       现在改成：凡是会读结果的地方，先 settleDue() 一次。每个动作都幂等，
+       重复执行无副作用，因此「点推进」和「拨时钟」走的是同一套语义。 */
+    @Transactional
+    public List<String> settleDue() {
+        StageConfig cur = stage.current();
         List<String> log = new ArrayList<>();
-        // 进入下一阶段前，结算上一阶段的结果
-        if ("INTERVIEW".equals(cur.code)) {
+        if (cur == null) return log;
+        int s = cur.seq;
+
+        if (s >= stage.seq("CONFIRM")) {          // 面试结束：导师的决策要变成学生看得见的拟录取
             int n = generateOffers();
-            log.add("生成拟录取意向 " + n + " 条");
+            if (n > 0) log.add("生成拟录取意向 " + n + " 条");
+            int auto = autoConfirmSingles();
+            if (auto > 0) log.add("单意向自动确认 " + auto + " 人");
         }
-        if ("CONFIRM".equals(cur.code)) {
+        if (s >= stage.seq("SUPPLEMENT")) {       // 确认期已过：逾期释放 + 按序递补
             int expired = expireUnconfirmed();
             int filled = fillWaitlist();
-            log.add("逾期未确认释放 " + expired + " 条，递补补位 " + filled + " 人");
+            if (expired > 0 || filled > 0) log.add("逾期未确认释放 " + expired + " 条，递补补位 " + filled + " 人");
         }
-        stage.moveTo(next.startAt.plusMinutes(30));
-        if ("CONFIRM".equals(next.code)) {
-            int auto = autoConfirmSingles();
-            log.add("单意向自动确认 " + auto + " 人");
-        }
-        if ("PUBLISH".equals(next.code)) {
+        if (s >= stage.seq("PUBLISH")) {          // 公示：调剂落库 + 录取结果转正式
+            int adj = ((Number) adjustCommit().getOrDefault("count", 0)).intValue();
+            if (adj > 0) log.add("统筹调剂安排 " + adj + " 人");
             int fin = finalizeAll();
-            log.add("录取结果转正式 " + fin + " 条");
+            if (fin > 0) log.add("录取结果转正式 " + fin + " 条");
         }
-        return Map.of("ok", true, "stage", stage.current().name, "log", log);
+        return log;
     }
 
     @Transactional
@@ -675,6 +756,15 @@ public class SelectionService {
 
     @Transactional
     public Map<String, Object> adjustCommit() {
+        /* 调剂落库只能在「统筹调剂录取」及之后的阶段做。没有这道闸，管理员在面试或确认阶段
+           点一下「确认落库」，会把当时还没拿到拟录取的人一次性全分掉。
+           用 seq 比较而不是 at("ADJUST")：管理员拨时钟直接跳到公示时，
+           这一步也得能补上，否则这批人永远停在「未落定」。 */
+        StageConfig cur = stage.current();
+        if (cur == null || cur.seq < stage.seq("ADJUST")) {
+            throw new ApiException("调剂落库只在「统筹调剂录取」阶段执行，当前阶段是「"
+                    + (cur == null ? "未开始" : cur.name) + "」");
+        }
         Map<String, Object> preview = adjustPreview();
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rows = (List<Map<String, Object>>) preview.get("rows");
@@ -712,7 +802,9 @@ public class SelectionService {
         return Map.of("ok", true, "batchNo", a.batchNo);
     }
 
+    @Transactional
     public Map<String, Object> announcement() {
+        settleDue();
         List<Announcement> list = em.createQuery(
                 "select a from Announcement a order by a.id desc", Announcement.class).getResultList();
         List<Map<String, Object>> groups = new ArrayList<>();
@@ -738,7 +830,9 @@ public class SelectionService {
         return Map.of("announcements", list, "groups", groups);
     }
 
+    @Transactional
     public Map<String, Object> studentHome(Long studentId) {
+        settleDue();
         Student s = student(studentId);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("student", s);
@@ -747,6 +841,102 @@ public class SelectionService {
         Enrollment e = myEnrollment(studentId);
         out.put("enrollment", e == null ? null : enrollmentRow(e));
         return out;
+    }
+
+    // ---------------------------------------------------------------- 简历
+
+    /** 扩展名白名单比 contentType 可靠：浏览器给的 MIME 经常是空串或 application/octet-stream。 */
+    private static final Set<String> RESUME_EXT = Set.of("pdf", "doc", "docx");
+    public static final long RESUME_MAX = 5L * 1024 * 1024;
+
+    @Transactional
+    public Map<String, Object> saveResume(Long studentId, String fileName, String contentType, byte[] data) {
+        /* 公示之后材料不再被审阅，也不该再变。前端会把入口藏起来，但前端藏不算限制。 */
+        StageConfig cur = stage.current();
+        if (cur != null && cur.seq >= stage.seq("PUBLISH")) {
+            throw new ApiException("结果已公示，不再接受简历更新");
+        }
+        String name = baseName(fileName);
+        if (name.isEmpty()) throw new ApiException("没有读到文件名");
+        if (!RESUME_EXT.contains(extOf(name))) throw new ApiException("只接受 PDF 或 Word（.pdf / .doc / .docx）");
+        if (data == null || data.length == 0) throw new ApiException("文件是空的");
+        if (data.length > RESUME_MAX) {
+            throw new ApiException("文件不能超过 5MB，当前 " + String.format("%.1f", data.length / 1048576.0) + "MB");
+        }
+        /* 一个学生只留一份，重新上传即覆盖。先删后插，避免 unique 约束撞车。 */
+        em.createQuery("delete from Resume r where r.studentId=:s")
+                .setParameter("s", studentId).executeUpdate();
+        Resume r = new Resume();
+        r.studentId = studentId;
+        r.fileName = name;
+        r.contentType = contentType == null ? "" : contentType;
+        r.size = data.length;
+        r.uploadedAt = stage.now();
+        r.data = data;
+        em.persist(r);
+        return Map.of("resume", metaOf(r));
+    }
+
+    @Transactional
+    public Map<String, Object> deleteResume(Long studentId) {
+        em.createQuery("delete from Resume r where r.studentId=:s")
+                .setParameter("s", studentId).executeUpdate();
+        return Map.of("ok", true);
+    }
+
+    /** 只取元数据。JPQL 不 select data，Hibernate 就不会把 BLOB 读出来。 */
+    public Map<String, Object> resumeMeta(Long studentId) {
+        List<Object[]> rows = em.createQuery(
+                        "select r.fileName, r.size, r.contentType, r.uploadedAt from Resume r where r.studentId=:s",
+                        Object[].class)
+                .setParameter("s", studentId).getResultList();
+        if (rows.isEmpty()) return null;
+        Object[] o = rows.get(0);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("fileName", o[0]);
+        m.put("size", o[1]);
+        m.put("contentType", o[2]);
+        m.put("uploadedAt", o[3]);
+        return m;
+    }
+
+    /** 下载才真的把二进制读出来。 */
+    public Resume resumeFile(Long studentId) {
+        List<Resume> l = em.createQuery("select r from Resume r where r.studentId=:s", Resume.class)
+                .setParameter("s", studentId).getResultList();
+        return l.isEmpty() ? null : l.get(0);
+    }
+
+    /** 导师下载简历：必须是真报过这位导师的学生，否则任何导师都能翻全院学生的简历。 */
+    public Resume mentorResume(Long mentorId, Long studentId) {
+        if (count("select count(i) from Intention i where i.mentorId=:m and i.studentId=:s", "m", mentorId, "s", studentId) == 0) {
+            throw new ApiException("这个学生没有填报你，无权查看其简历");
+        }
+        Resume r = resumeFile(studentId);
+        if (r == null) throw new ApiException("该学生还没有上传简历");
+        return r;
+    }
+
+    private Map<String, Object> metaOf(Resume r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("fileName", r.fileName);
+        m.put("size", r.size);
+        m.put("contentType", r.contentType);
+        m.put("uploadedAt", r.uploadedAt);
+        return m;
+    }
+
+    /** IE / 部分客户端会把整个本地路径塞进文件名，只留最后一段。 */
+    private String baseName(String fileName) {
+        if (fileName == null) return "";
+        String s = fileName.replace('\\', '/');
+        int i = s.lastIndexOf('/');
+        return (i >= 0 ? s.substring(i + 1) : s).trim();
+    }
+
+    private String extOf(String fileName) {
+        int i = fileName.lastIndexOf('.');
+        return i < 0 ? "" : fileName.substring(i + 1).toLowerCase(Locale.ROOT);
     }
 
     // ---------------------------------------------------------------- 基础数据维护
@@ -774,6 +964,55 @@ public class SelectionService {
         m.labId = labId;
         em.merge(m);
         return Map.of("ok", true);
+    }
+
+    /** 管理员改导师档案：职称、方向、所属实训室、名额、剩余、简介。
+     *
+     *  几个字段都是"给什么改什么"，null 表示不动——前端弹窗只提交用户真改过的那几项，
+     *  不该因为弹窗里没渲染某个字段就把它清空。
+     *
+     *  「名额」和「剩余」是同一个数的两种写法（剩余 = 名额 − 已录取）。管理员可能从
+     *  任一列去改，所以两个都收，谁给了就按谁反推名额；两个都给时以名额为准。 */
+    @Transactional
+    public Map<String, Object> updateMentor(Long mentorId, String title, String tags, Long labId,
+                                            Integer quota, Integer remainingWanted, String intro) {
+        Mentor m = mentor(mentorId);
+        if (m == null) throw new ApiException("导师不存在");
+        long enrolled = enrolledCount(mentorId);
+
+        if (title != null) {
+            if (title.isBlank()) throw new ApiException("职称不能为空");
+            m.title = title.trim();
+        }
+        if (tags != null) m.tags = tags.trim();
+
+        if (labId != null && !labId.equals(m.labId)) {
+            if (lab(labId) == null) throw new ApiException("实训室不存在");
+            /* 和 moveMentor 同一条规矩：名下有学生就不许挪，否则录取关系会挂在别的室下面 */
+            if (enrolled > 0) throw new ApiException("该导师名下已有 " + enrolled + " 名学生，需先完成调剂再移动");
+            m.labId = labId;
+        }
+
+        Integer nextQuota = quota;
+        if (nextQuota == null && remainingWanted != null) {
+            nextQuota = (int) (remainingWanted + enrolled);
+        }
+        if (nextQuota != null) {
+            if (nextQuota < enrolled) {
+                throw new ApiException("名额不能小于已录取的 " + enrolled + " 人");
+            }
+            if (nextQuota > 50) throw new ApiException("单个导师名额上限 50");
+            m.quota = nextQuota;
+        }
+
+        if (intro != null) {
+            m.intro = intro.trim();
+            /* 管理员亲手写的简介就是定稿，不用再走「导师提交 → 待审核」那一圈 */
+            m.introStatus = "APPROVED";
+        }
+
+        em.merge(m);
+        return Map.of("ok", true, "quota", m.quota, "remaining", remaining(m));
     }
 
     @Transactional

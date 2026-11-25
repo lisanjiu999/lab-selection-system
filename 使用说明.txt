@@ -1,0 +1,32 @@
+使用说明
+================================================
+
+1. 先完整解压
+   右键这个压缩包 → 全部解压缩，解压到一个文件夹里。
+   不要直接在压缩包预览窗口里双击 启动.bat —— 那样 Windows 只会
+   把 bat 这一个文件解压到临时目录，同目录的 jar 不在，程序会报
+   [ERROR] selection-system-1.0.0.jar not found。
+
+2. 再双击启动
+   进入解压出来的 selection-system 文件夹，双击 启动.bat。
+   运行需要 JDK 17 或更高版本（命令行执行 java -version 可查看）。
+   窗口里出现 http://localhost:8080 即启动成功，关闭窗口即停止。
+
+3. 打开浏览器
+   访问 http://localhost:8080
+   管理员 admin / Admin@2026
+   学生 20221001 / Lab@1001
+   导师 T2008 / Lab@2008
+
+目录说明
+------------------------------------------------
+target/selection-system-1.0.0.jar   已编译好的程序（约 46 MB）
+src/                                源代码
+db/lab-selection.sql                数据库备份
+start.bat / 启动.bat                Windows 启动脚本
+start.sh                            Linux / macOS 启动脚本
+RUN.md                              本地运行说明（详细）
+DEPLOY.md                           部署说明（服务器）
+
+若启动时提示端口被占用，先关闭占用 8080 的程序，或改用：
+    java -jar target\selection-system-1.0.0.jar --server.port=9000

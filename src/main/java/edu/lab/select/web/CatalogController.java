@@ -33,6 +33,14 @@ public class CatalogController extends BaseController {
         return service.labDetail(id);
     }
 
+    /** 开放日 3D 展厅用：比 labDetail 多带导师的完整简介。 */
+    @GetMapping("/labs/{id}/hall")
+    public Map<String, Object> hall(@RequestHeader(value = "X-Token", required = false) String token,
+                                    @PathVariable Long id) {
+        session(token);
+        return service.hallOf(id);
+    }
+
     @GetMapping("/mentors")
     public Map<String, Object> mentors(@RequestHeader(value = "X-Token", required = false) String token) {
         session(token);

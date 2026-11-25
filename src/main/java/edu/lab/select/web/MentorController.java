@@ -2,6 +2,7 @@ package edu.lab.select.web;
 
 import edu.lab.select.service.SelectionService;
 import edu.lab.select.service.TokenStore;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -54,6 +55,12 @@ public class MentorController extends BaseController {
         Long mid = self(token, "mentor");
         return service.updateProfile(mid,
                 str(body.get("title")), str(body.get("tags")), str(body.get("intro")));
+    }
+
+    @GetMapping("/applicants/{studentId}/resume")
+    public ResponseEntity<byte[]> resume(@RequestHeader(value = "X-Token", required = false) String token,
+                                         @PathVariable Long studentId) {
+        return attachment(service.mentorResume(self(token, "mentor"), studentId));
     }
 
     private int num(Object o) {
